@@ -39,7 +39,7 @@ Route::prefix('customer')->group(function () {
     Route::post('/order', [CostumerController::class, 'store'])->name('customer.order');
     
 
-Route::post('/customer/checkout', [CostumerController::class, 'checkout'])->name('customer.checkout');
+Route::post('/checkout', [CostumerController::class, 'checkout'])->name('customer.checkout');
     // Success page
     Route::get('/success/{transaction}', [CostumerController::class, 'success'])->name('customer.success');
 });
@@ -99,3 +99,53 @@ Route::prefix('panel')->middleware(['auth'])->group(function () {
 
 });
 
+// Route::middleware(['auth'])->prefix('api')->group(function() {
+//     Route::get('/notifications', function () {
+//         $user = auth()->user();
+
+//         return [
+//             'unread' => $user->unreadNotifications()->count(),
+//             'notifications' => $user->notifications->map(fn($n) => [
+//                 'id' => $n->id,
+//                 'type' => $n->type,
+//                 'data' => $n->data,
+//                 'read_at' => $n->read_at
+//             ]),
+//         ];
+//     })->name('api.notifications');
+
+//     // mark as read
+//     Route::post('/notifications/{id}/read', function ($id) {
+//         $user = auth()->user();
+//         $notif = $user->unreadNotifications()->find($id);
+//         if ($notif) $notif->markAsRead();
+//         return ['status' => 'ok'];
+//     })->name('api.notifications.read');
+// });
+
+
+Route::get('/api/notifications', function () {
+    $notifs = \Illuminate\Support\Facades\DB::table('notifications')
+        ->whereNull('read_at')
+        ->orderByDesc('created_at')
+        ->get();
+
+    return response()->json([
+        'unread' => $notifs->count(),
+        'notifications' => $notifs->map(function($n){
+            $data = json_decode($n->data, true);
+            return [
+                'id' => $n->id,
+                'data' => [
+                    'invoice' => $data['invoice'] ?? '',
+                    'nama_pelanggan' => $data['nama_pelanggan'] ?? '',
+                    'nomor_meja' => $data['nomor_meja'] ?? '',
+                    'total' => $data['total'] ?? 0
+                ]
+            ];
+        })
+    ]);
+})->name('api.notifications');
+
+Route::get('transactions/invoice/{kode}', [TransactionController::class, 'showByInvoice'])
+    ->middleware(['auth'])->name('transactions.invoice.show');

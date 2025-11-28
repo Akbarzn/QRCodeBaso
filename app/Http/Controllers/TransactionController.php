@@ -117,7 +117,7 @@ class TransactionController extends Controller
     /** ✅ Detail transaksi */
     public function show(Transaction $transaction)
     {
-        return view('transactions.show', compact('transaction'));
+        return view('transactions.detail', compact('transaction'));
     }
 
     /** ✅ Hapus transaksi (soft delete) */
@@ -192,5 +192,25 @@ class TransactionController extends Controller
         'transaction' => $transaction
     ]);
 }
+
+public function showByInvoice($kode)
+{
+    $transaction = Transaction::where('kode_transaksi', $kode)->first();
+
+    if (!$transaction) {
+        abort(404, 'Invoice tidak ditemukan ❌');
+    }
+
+    
+    $transactions = Transaction::where('status', '  ')
+        ->orderByDesc('created_at')->get();
+        
+        return view('transactions.index', [
+        'transactions'   => $transactions, // ✅ dipakai di index
+        'transactionNow' => $transaction   // ✅ khusus item yang barusan diklik (detail)
+    ]);
+    // return view('transactions.index', compact('transaction'));
+}
+
 
 }

@@ -10,6 +10,8 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
 use Midtrans\Config;
 use Midtrans\Snap;
+use App\Notifications\OrderMasuk;
+use App\Models\User;
 
 class CostumerController extends Controller
 {
@@ -71,45 +73,93 @@ class CostumerController extends Controller
 
     /** Simpan order */
     public function store(Request $request)
-    {
-        $validated = $request->validate([
-            'nama_pelanggan'    => 'required|string|max:120',
-            'nomor_meja'        => 'required|string|max:20',
-            'metode_pembayaran' => 'required|in:manual,midtrans',
-            'menus'             => 'array'
+{
+    $validated = $request->validate([
+        'nama_pelanggan'    => 'required|string|max:120',
+        'nomor_meja'        => 'required|string|max:20',
+        'metode_pembayaran' => 'required|in:manual,midtrans',
+        'menus'             => 'array'
+    ]);
+
+    $menus = session('menus', []);
+    $total = session('total_harga', 0);
+
+    // ✅ Simpan transaksi dulu (status=menunggu, payment=pending)
+    $transaction = Transaction::create([
+        'kode_transaksi'    => $request->kode_transaksi ?? 'TRX-' . Str::upper(Str::random(8)),
+        'nama_pelanggan'   => $validated['nama_pelanggan'],
+        'nomor_meja'       => $validated['nomor_meja'],
+        'metode_pembayaran'=> $validated['metode_pembayaran'],
+        'status'           => 'menunggu',
+        'payment_status'   => 'pending',
+        'total_harga'      => $total,
+        'snap_url'         => null,
+    ]);
+
+    // ✅ Simpan detail menu
+    foreach ($menus as $item) {
+        MenuTransaction::create([
+            'transaction_id'=> $transaction->id,
+            'menu_id'      => $item['menu_id'],
+            'jumlah'       => $item['jumlah'],
+            'harga'        => $item['harga'],
+            'subtotal'     => $item['subtotal'],
+            'catatan'      => $item['catatan']
         ]);
+    }
 
-        $menus = session('menus', []);
-        $total = session('total_harga', 0);
+    
+    // ========================================
+    // 🔔 NOTIF ADMIN → TEMPATNYA DI SINI BANG
+    // ========================================
+    $admin = User::find(1);
+    if ($admin) {
+        $admin->notify(new OrderMasuk($transaction));
+    }
 
-        $transaction = Transaction::create([
-            'kode_transaksi'    => $request->kode_transaksi,
-            'nama_pelanggan'   => $validated['nama_pelanggan'],
-            'nomor_meja'       => $validated['nomor_meja'],
-            'metode_pembayaran'=> $validated['metode_pembayaran'],
-            'status'           => 'menunggu',
-            'payment_status'   => 'unpaid',
-            'total_harga'      => $total,
-            'snap_url'         => null,
-        ]);
+    // 🔥 Jika metode = MIDTRANS → buat SNAP dan redirect ke halaman bayar
+    if ($validated['metode_pembayaran'] === 'midtrans') {
+        Config::$serverKey = env('MIDTRANS_SERVER_KEY');
+        Config::$clientKey = env('MIDTRANS_CLIENT_KEY');
+        Config::$isProduction = false;
 
-        foreach ($menus as $item) {
-            MenuTransaction::create([
-                'transaction_id'=> $transaction->id,
-                'menu_id'  => $item['menu_id'],
-                'jumlah'   => $item['jumlah'],
-                'harga'    => $item['harga'],
-                'subtotal' => $item['subtotal'],
-                'catatan'  => $item['catatan']
+        $payload = [
+            'transaction_details' => [
+                'order_id'     => $transaction->kode_transaksi,
+                'gross_amount' => (int) $total,
+            ],
+            'customer_details' => [
+                'first_name' => $validated['nama_pelanggan'],
+                'email'      => $request->email ?? "customer@mail.com",
+                'phone'      => "-"
+            ],
+            'callbacks' => [
+                'finish' => url('/customer/success/' . $transaction->id)
+            ]
+        ];
+
+        try {
+            $snap = Snap::createTransaction($payload);
+            $transaction->update([
+                'snap_url' => $snap->redirect_url // simpan URL Snap ke DB
             ]);
+        } catch (\Exception $e) {
+            Log::error('Midtrans Error:', [$e->getMessage()]);
+            return back()->with('error', 'Gagal generate pembayaran ❌');
         }
 
         session()->forget(['menus','total_harga']);
 
-        // redirect ke halaman success
-        return redirect()->route('customer.success', $transaction->id)
-            ->with('success','Order berhasil ✅');
+        // 🚀 Redirect ke SNAP MIDTRANS
+        return redirect($snap->redirect_url);
     }
+
+    // Manual → success langsung
+    session()->forget(['menus','total_harga']);
+    return redirect()->route('customer.success', $transaction->id)
+        ->with('success','Order berhasil dikirim ✅');
+}
+
 
     /** Success Page (lebih detail) */
     public function success(Transaction $transaction)

@@ -59,4 +59,27 @@
     </div>
 
 </div>
+
+<script>
+
+    document.addEventListener("DOMContentLoaded", () => {
+        new Audio("{{ asset('storage/notif.mp3') }}").play(); // bunyi saat masuk success
+        
+        // tombol confirm bayar dari admin (nanti dipakai di UI notif)
+  document.body.addEventListener("click", async (e) => {
+    if (e.target.classList.contains("btn-confirm")) {
+        const id = e.target.dataset.id;
+        await fetch(`/panel/transactions/${id}/confirm-payment`, {
+        method: "PATCH",
+        headers: {
+            "X-CSRF-TOKEN": "{{ csrf_token() }}",
+            "Content-Type": "application/json"
+        }
+    });
+      alert("Pembayaran dikonfirmasi admin ✅");
+    }
+});
+});
+</script>
+
 @endsection
